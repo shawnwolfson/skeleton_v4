@@ -32,6 +32,19 @@ void ctrlCHandler(int sig_num) {
 }
 
 void alarmHandler(int sig_num) {
-  // TODO: Add your implementation
+  SmallShell& smash = SmallShell::getInstance();
+  cout << "smash: got an alarm" << endl;
+  if(smash.process_in_foreground_got_alarm)
+  {
+    cout << "smash: " << *(smash.last_alarm) << " timed out!" << endl;
+    kill(smash.current_process_running_in_foreground_pid, SIGKILL);
+    smash.process_in_foreground_got_alarm = false;
+    *(smash.last_alarm) = "";
+  }
+  else
+  {
+    smash.alarms_list.removeAlarms();
+  }
+
 }
 

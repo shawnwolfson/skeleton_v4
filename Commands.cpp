@@ -136,17 +136,24 @@ bool isBackGroundAndBasicCommand(string first_word)
 
 // TODO: Add your implementation for classes in Commands.h 
 
-SmallShell::SmallShell() : line_prompt("smash"),last_pwd(nullptr), current_process_running_in_foreground_pid(NO_PROCCESS), last_command(new string),cur_pipe(false){
-};
+SmallShell::SmallShell() : line_prompt("smash"),last_pwd(nullptr), current_process_running_in_foreground_pid(NO_PROCCESS), last_command(new string),cur_pipe(false), 
+                           jobs_list({}), alarms_list({}), current_duration(0), last_alarm(new string), process_in_foreground_got_alarm(false){};
 
 SmallShell::~SmallShell() {
-  delete last_command;
+  if(last_command != nullptr)
+  {
+    delete last_command;
+  }
+  if(last_alarm != nullptr)
+  {
+    delete last_alarm;
+  }
 }
 
 /**
 * Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 */
-Command * SmallShell::CreateCommand(const char* cmd_line) {
+Command * SmallShell::CreateCommand(const char* cmd_line, bool is_timed_command) {
 
   string cmd_s = _trim(string(cmd_line));
 
@@ -208,22 +215,26 @@ Command * SmallShell::CreateCommand(const char* cmd_line) {
   {
     return new SetcoreCommand(cmd_line, &(this->jobs_list));
   }
+  else if (firstWord.compare("timeout") == 0)
+  {
+    return new TimeoutCommand(cmd_line);
+  }
   else {
-    return new ExternalCommand(cmd_line);
+    return new ExternalCommand(cmd_line, is_timed_command);
   }
   return nullptr;
   
 }
 
-void SmallShell::executeCommand(const char *cmd_line) {
-  // TODO: Add your implementation here
-  // for example:
+void SmallShell::executeCommand(const char *cmd_line, bool is_timed_command) {
   SmallShell& shell = SmallShell::getInstance();
   shell.jobs_list.removeFinishedJobs();
-  Command* cmd = CreateCommand(cmd_line);
+  Command* cmd = CreateCommand(cmd_line, is_timed_command);
   cmd->execute();
   shell.current_process_running_in_foreground_pid = NO_PROCCESS;
-  // Please note that you must fork smash process for some commands (e.g., external commands....)
+  delete cmd;
+  shell.current_duration = 0;
+  shell.process_in_foreground_got_alarm = false;
 }
 
 /////// Command Constructor //////
@@ -650,7 +661,7 @@ void QuitCommand::execute()
 
 //// External Commandes ////
 
-ExternalCommand::ExternalCommand(const char* cmd_line) : Command(cmd_line){};
+ExternalCommand::ExternalCommand(const char* cmd_line, bool is_timed_command) : Command(cmd_line), is_timed_command(is_timed_command){};
 
 void ExternalCommand::execute()
 {
@@ -705,17 +716,27 @@ void ExternalCommand::execute()
       }
     }
   }
+  //Father process e.g smash
   else
   {
     SmallShell &smash = SmallShell::getInstance();
     if(background_command) 
     {
-    smash.jobs_list.addJob((cmd_line),process_pid,false);
+      smash.jobs_list.addJob(cmd_line,process_pid,false);
+      if(is_timed_command)
+      {
+        smash.alarms_list.addAlarm(cmd_line, process_pid, smash.current_duration);
+      }
+      this->is_timed_command = false;
     }
     else
     {
       smash.current_process_running_in_foreground_pid = process_pid;
       *(smash.last_command) = cmd_line;
+      if(is_timed_command)
+      {
+        smash.process_in_foreground_got_alarm = true;
+      }
       int status;
       if(waitpid(process_pid,&status,WUNTRACED) == FAIL)
       {
@@ -966,23 +987,6 @@ void PipeCommand::execute()
 }
 
 
-  
-  
-  
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 ////// Fare Command //////
 
@@ -1126,3 +1130,64 @@ SetcoreCommand::SetcoreCommand(const char* cmd_line, JobsList* jobs_list) : Buil
   }
   FreeArgs(args,args_num);
  }
+
+
+
+//Alarms and Timeout Command ///
+
+AlarmsList::AlarmsList() : alarms_list({}) {}
+
+AlarmsList::AlarmEntry::AlarmEntry(time_t entered_list_time, time_t duration, std::string* cmd_line, __pid_t pid) :
+                                  entered_list_time(entered_list_time), duration(duration),max_time(entered_list_time + duration), cmd_line(cmd_line), pid(pid) {}
+
+void AlarmsList::addAlarm(const char* cmd_line, __pid_t pid, time_t duration)
+{
+  string* cmd_line_as_string = new string(cmd_line);
+  alarms_list.push_back(AlarmEntry(time(nullptr), duration, cmd_line_as_string, pid));
+}
+
+void AlarmsList::removeAlarms()
+{
+  SmallShell& smash = SmallShell::getInstance();
+  for( auto current_alarm = alarms_list.begin(); current_alarm != alarms_list.end(); current_alarm++)
+  {
+    if(time(nullptr) >= current_alarm->max_time)
+    {
+      cout << "smash: timeout " << current_alarm->duration << " " << *(current_alarm->cmd_line) << " timed out!" << endl;
+      if(current_alarm->cmd_line != nullptr)
+      {
+        delete current_alarm->cmd_line;
+      }
+      kill(current_alarm->pid, SIGTSTP);
+      alarms_list.erase(current_alarm);
+      current_alarm--;
+    }
+  }
+}
+
+TimeoutCommand::TimeoutCommand(const char* cmd_line) : BuiltInCommand(cmd_line) {}
+
+void TimeoutCommand::execute()
+{
+  SmallShell& smash = SmallShell::getInstance();
+  int arg_num = 0;
+  char** args = PrepareArgs(cmd_line, &arg_num);
+  if(!args)
+  {
+    perror("smash error: malloc failed");
+    return;
+  }
+  time_t duration = stoi(args[1]);
+  //Extract command
+  string command;
+  for(int i = 2; i < arg_num; i++)
+  {
+    command = command + (string)args[i] + " ";
+  }
+  command.pop_back();
+  alarm(duration);
+  smash.current_duration = duration;
+  *(smash.last_alarm) = (string)cmd_line;
+  smash.executeCommand(command.c_str(), true);
+  FreeArgs(args, arg_num);
+}

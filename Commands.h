@@ -33,7 +33,8 @@ class BuiltInCommand : public Command {
 
 class ExternalCommand : public Command {
  public:
-  ExternalCommand(const char* cmd_line);
+  bool is_timed_command;
+  ExternalCommand(const char* cmd_line, bool is_timed_command);
   virtual ~ExternalCommand() {}
   void execute() override;
 };
@@ -144,7 +145,27 @@ class JobsList {
   void removeJobById(int jobId);
   JobEntry * getLastJob(int* lastJobId);
   JobEntry *getLastStoppedJob(int *jobId);
-  // TODO: Add extra methods or modify exisitng ones as needed
+};
+
+class AlarmsList {
+ public:
+  class AlarmEntry {
+  public:
+    time_t entered_list_time;
+    time_t duration;
+    time_t max_time;
+    std::string* cmd_line;
+    __pid_t pid;
+    AlarmEntry(time_t entered_list_time, time_t duration, std::string* cmd_line, __pid_t pid);
+    virtual ~AlarmEntry() {}
+  };
+
+ public:
+  std::vector<AlarmEntry> alarms_list;
+  AlarmsList();
+  virtual ~AlarmsList() {}
+  void addAlarm(const char* cmd_line, __pid_t pid, time_t duration);
+  void removeAlarms();
 };
 
 class JobsCommand : public BuiltInCommand {
@@ -172,8 +193,6 @@ class BackgroundCommand : public BuiltInCommand {
 };
 
 class TimeoutCommand : public BuiltInCommand {
-/* Optional */
-// TODO: Add your data members
  public:
   explicit TimeoutCommand(const char* cmd_line);
   virtual ~TimeoutCommand() {}
@@ -211,12 +230,16 @@ class SmallShell {
   SmallShell();
  public:
   std::string line_prompt;
-  JobsList jobs_list;
   char* last_pwd;
   int current_process_running_in_foreground_pid;
   std::string* last_command;
   bool cur_pipe;
-  Command *CreateCommand(const char* cmd_line);
+  JobsList jobs_list;
+  AlarmsList alarms_list;
+  time_t current_duration;
+  std::string* last_alarm;
+  bool process_in_foreground_got_alarm;
+  Command *CreateCommand(const char* cmd_line, bool is_timed_command = false);
   SmallShell(SmallShell const&)      = delete; // disable copy ctor
   void operator=(SmallShell const&)  = delete; // disable = operator
   static SmallShell& getInstance() // make SmallShell singleton
@@ -226,7 +249,7 @@ class SmallShell {
     return instance;
   }
   ~SmallShell();
-  void executeCommand(const char* cmd_line);
+  void executeCommand(const char* cmd_line, bool is_timed_command = false);
 };
 
 #endif //SMASH_COMMAND_H_
