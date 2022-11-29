@@ -189,10 +189,9 @@ class FareCommand : public BuiltInCommand {
 };
 
 class SetcoreCommand : public BuiltInCommand {
-  /* Optional */
-  // TODO: Add your data members
+JobsList* jobs_list;
  public:
-  SetcoreCommand(const char* cmd_line);
+  SetcoreCommand(const char* cmd_line,JobsList* jobs_list);
   virtual ~SetcoreCommand() {}
   void execute() override;
 };

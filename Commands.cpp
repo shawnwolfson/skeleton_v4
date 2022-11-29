@@ -7,15 +7,16 @@
 #include <iomanip>
 #include "Commands.h"
 #include <fcntl.h>
+#include <sched.h>
+#include <thread>
 
 //delete this
-//and this
-//this
 #define MAX_ARGS 20
 #define MIN_ARGS 2
 #define LINUX_MAX_PATH_LENGTH 4096
 #define FAIL -1
 #define NO_JOB_ID -1
+#define BUFFER_SIZE 1024
 
 using namespace std;
 const std::string WHITESPACE = " \n\r\t\f\v";
@@ -198,6 +199,14 @@ Command * SmallShell::CreateCommand(const char* cmd_line) {
   else if (firstWord.compare("quit") == 0)
   {
     return new QuitCommand(cmd_line, &jobs_list);
+  }
+  else if (firstWord.compare("fare") == 0)
+  {
+    return new FareCommand(cmd_line);
+  }
+  else if (firstWord.compare("setcore") == 0)
+  {
+    return new SetcoreCommand(cmd_line, &(this->jobs_list));
   }
   else {
     return new ExternalCommand(cmd_line);
@@ -649,15 +658,11 @@ void ExternalCommand::execute()
   std::string command_line = _trim(string(cmd_line));
   bool is_complex_command = false;
   //Find out if the external command is complex or not
-  for (int i = 0 ;cmd_line[i] != '\0' ; i++)
+  if (command_line.find("*") != std::string::npos || command_line.find("?") != std::string::npos)
   {
-    if (cmd_line[i] == '?' || cmd_line[i] == '*')
-    {
-      is_complex_command == true;
-      break;
-    }
+    is_complex_command = true;
   }
-
+   
   char new_command [MAX_COMMAND_LENGTH];
   strcpy(new_command,command_line.c_str());
 
@@ -752,8 +757,8 @@ RedirectionCommand::RedirectionCommand(const char* cmd_line) : Command(cmd_line)
     do_override = false;
   }
   //Extract command for shell
-  int first_occurence_of_redirection_sym = cmd_line_as_string.find_first_of('>');
-  string command = cmd_line_as_string.substr(0, first_occurence_of_redirection_sym - 1);
+  int first_occurence_of_red_sym = cmd_line_as_string.find_first_of('>');
+  string command = cmd_line_as_string.substr(0, first_occurence_of_red_sym);
   //Extract filename
   int last_occurence_of_redirect_sym = cmd_line_as_string.find_last_of('>');
   string filename = cmd_line_as_string.substr(last_occurence_of_redirect_sym + 1, cmd_line_as_string.size());
@@ -820,8 +825,8 @@ void RedirectionCommand::execute()
 PipeCommand::PipeCommand(const char* cmd_line) : Command(cmd_line)
 {
   std::string cmd_line_as_string = string(cmd_line);
-  bool delimiter_type = cmd_line_as_string.find("|&") > 0;
-  if(delimiter_type)
+
+  if((cmd_line_as_string).find("|&") != std::string::npos)
   {
     delimiter = "|&";
     second_command = cmd_line_as_string.substr(cmd_line_as_string.find(delimiter)+2,cmd_line_as_string.length());
@@ -961,28 +966,163 @@ void PipeCommand::execute()
 }
 
 
+  
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ////// Fare Command //////
-/*FareCommand::FareCommand(const char* cmd_line) : BuiltInCommand(cmd_line), words_replaced(0) {}
+
+FareCommand::FareCommand(const char* cmd_line) : BuiltInCommand(cmd_line), words_replaced(0) {}
 
 void FareCommand::execute()
 {
   int args_num = 0;
   char** args = PrepareArgs(cmd_line, &args_num);
   //TODO : add input check
-  fstream file;
+  int original_file_descriptor;
+  int temp_file_descriptor;
   string word;
+  string file_name = (string)args[1];
+  string file_format = file_name.substr(file_name.find_first_of('.'), file_name.size());
   string source = (string)args[2];
   string dest = (string)args[3];
-  file.open(args[1]);
-  while(file >> word)
+  string temp_file_name = "t_temp_try_7" + file_format;
+  int replaces_counter = 0;
+  original_file_descriptor = open(file_name.c_str(), O_RDONLY);
+  if(original_file_descriptor == FAIL)
   {
-    size_t start_of_source = (word).find(source);
-    if(start_of_source != std::string::npos)
-    {
-      word.replace(start_of_source, start_of_source + source.size(), dest);
-    }
+    perror("smash error: open failed");
+    FreeArgs(args, args_num);
+    return;
   }
+  temp_file_descriptor = open(temp_file_name.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  if(temp_file_descriptor == FAIL){
+    perror("smash error: open failed");
+    FreeArgs(args, args_num);
+    return;
+  }
+  while(1)
+  {
+    char* buffer = (char*) malloc(sizeof(char) * BUFFER_SIZE);
+    int read_res = read(original_file_descriptor, buffer, 2 * source.size());
+    if(read_res == FAIL)
+    {
+      perror("smash error: read failed");
+      FreeArgs(args, args_num);
+      free(buffer);
+      return;
+    }
+    else if(read_res == 0)
+    {
+      break;
+    }
+    word = (string)buffer;
+    int curr_position = 0;
+    while((curr_position = word.find(source)) != std::string::npos)
+    {
+      word.replace(curr_position, source.size(), dest);
+      curr_position += dest.size();
+      replaces_counter += 1;
+    }
+    int write_res = write(temp_file_descriptor, word.c_str(), word.size());
+    if(write_res == FAIL)
+    {
+      perror("smash error: write failed");
+      FreeArgs(args, args_num);
+      free(buffer);
+      return;
+    }
+    free(buffer);
+  }
+  //If everything is ok
+  int close_original_res = close(original_file_descriptor);
+  if(close_original_res == FAIL)
+  {
+    perror("smash error: write failed");
+    FreeArgs(args, args_num);
+    return;
+  }
+  int close_temp_res = close(temp_file_descriptor);
+  if(close_temp_res == FAIL)
+  {
+    perror("smash error: write failed");
+    FreeArgs(args, args_num);
+    return;
+  }
+  //Delete old file
+  int remove_res = remove(file_name.c_str());
+  if(remove_res == FAIL)
+  {
+    perror("smash error: remove failed");
+    FreeArgs(args, args_num);
+    return;
+  }
+  
+  //Rename new file
+  int rename_res = rename(temp_file_name.c_str(), file_name.c_str());
+  if(rename_res == FAIL)
+  {
+    perror("smash error: rename failed");
+    FreeArgs(args, args_num);
+    return;   
+  }
+  cout << "replaced 2 instances of the string " << '"' << source << '"' << endl;
   FreeArgs(args, args_num);
 }
-*/
+
+
+
+///// Set Core Command ////
+SetcoreCommand::SetcoreCommand(const char* cmd_line, JobsList* jobs_list) : BuiltInCommand(cmd_line) ,jobs_list(jobs_list){};
+
+ void SetcoreCommand::execute ()
+ {
+  int args_num = 0;
+  char** args = PrepareArgs(cmd_line, &args_num);
+  auto max_core_num = std::thread::hardware_concurrency() - 1;
+  if (!_is_number(args[1]) || !_is_number(args[2]))
+  {
+    perror("smash error: setcore: invalid arguments");
+    FreeArgs(args,args_num);
+    return;
+  }
+  auto req_job = jobs_list->getJobById(stoi(args[1]));
+  if(!req_job)
+  {
+    cout << "smash error: setcore: job-id " << stoi(args[1]) << " does not exist" << endl;
+    FreeArgs(args,args_num);
+    return;
+  }
+  int req_core = stoi(args[2]);
+  if(req_core < 0 || req_core>max_core_num)
+  {
+    perror("smash error: setcore: invalid core number");
+    FreeArgs(args,args_num);
+    return;    
+  }
+
+  cpu_set_t mask;
+  CPU_ZERO(&mask);
+  CPU_SET(req_core,&mask);
+  if(sched_setaffinity(req_job->job_pid,sizeof(mask),&mask) == FAIL)
+  {
+    perror("smash error: sched_setaffinity failed");
+    FreeArgs(args,args_num);
+    return; 
+  }
+  FreeArgs(args,args_num);
+ }
