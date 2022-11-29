@@ -35,4 +35,7 @@ int main(int argc, char* argv[]) {
 /*TODO
 1. Check if builtin commands with apresand need to remove it, especially cd ..& and chprompt 44&
 2. Add smash errors for syscalls
+3. Post piazza to figure out prints in background timeout
+4. Bonus
+5. HARDCORE DEBUG
 */

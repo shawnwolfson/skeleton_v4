@@ -219,6 +219,10 @@ Command * SmallShell::CreateCommand(const char* cmd_line, bool is_timed_command)
   {
     return new TimeoutCommand(cmd_line);
   }
+  else if (firstWord.compare("kill") == 0)
+  {
+    return new KillCommand(cmd_line, &(this->jobs_list));
+  }
   else {
     return new ExternalCommand(cmd_line, is_timed_command);
   }
@@ -383,30 +387,38 @@ JobsList::JobEntry* JobsList::getLastJob(int* lastJobId)
 
 
 
-void JobsList::addJob(const char* cmd_line,__pid_t job_pid, bool isStopped)
+void JobsList::addJob(const char* cmd_line, __pid_t job_pid, bool isStopped  ,bool is_timed_command , time_t duration)
 {
   this->removeFinishedJobs();
   int args_num = 0;
   char** args_for_job = PrepareArgs(cmd_line, &args_num);
+  string temp = "timeout " + std::to_string(duration) + " ";
   string cmd_line_string = cmd_line;
   string* unique_cmd_line = new string(cmd_line_string);
-  jobs_list.push_back(JobEntry(jobs_counter, job_pid, time(nullptr), args_for_job, args_num, _isBackgroundComamnd(cmd_line), unique_cmd_line, isStopped));
+  if(is_timed_command)
+  {
+    (*unique_cmd_line) = temp +(*unique_cmd_line);
+    jobs_list.push_back(JobEntry(jobs_counter, job_pid, time(nullptr), args_for_job, args_num, _isBackgroundComamnd(cmd_line),unique_cmd_line, isStopped)); 
+  }
+  else
+  {
+    jobs_list.push_back(JobEntry(jobs_counter, job_pid, time(nullptr), args_for_job, args_num, _isBackgroundComamnd(cmd_line), unique_cmd_line, isStopped)); 
+  }
   jobs_counter += 1;
 }
 
-void JobsList::killAllJobs(int* killed)
+void JobsList::killAllJobs()
 {
   this->removeFinishedJobs();
-  *killed = jobs_list.size();
   for(int i = 0; i < jobs_list.size(); i++)
   {
+    cout << jobs_list[i].job_pid << ": " << *(jobs_list[i].cmd_line) << endl;
     if(kill(jobs_list[i].job_pid, SIGKILL) == FAIL)
     {
       cout << "smash error: kill failed"<<endl;
-      //return?
+      return;
     }
   }
-  
 }
 
 void JobsList::printJobsList()
@@ -648,12 +660,11 @@ void QuitCommand::execute()
   int arg_num = 0;
   char** args = PrepareArgs(cmd_line , &arg_num);
   string killfalg = "kill";
+  jobs_list->removeFinishedJobs();
   if ((arg_num > 1) && (killfalg.compare(args[1])) == 0)
   {
-    int killed;
-    smash.jobs_list.killAllJobs(&killed);
-
-    cout << "sending SIGKILL signal to " << killed <<" jobs:" <<endl;
+    cout << "sending SIGKILL signal to " << jobs_list->jobs_list.size() <<" jobs:" <<endl;
+    smash.jobs_list.killAllJobs();
   }
   FreeArgs(args, arg_num);
   exit(0);
@@ -722,7 +733,7 @@ void ExternalCommand::execute()
     SmallShell &smash = SmallShell::getInstance();
     if(background_command) 
     {
-      smash.jobs_list.addJob(cmd_line,process_pid,false);
+      smash.jobs_list.addJob(cmd_line,process_pid,false, is_timed_command, smash.current_duration);
       if(is_timed_command)
       {
         smash.alarms_list.addAlarm(cmd_line, process_pid, smash.current_duration);
@@ -1122,12 +1133,14 @@ SetcoreCommand::SetcoreCommand(const char* cmd_line, JobsList* jobs_list) : Buil
   cpu_set_t mask;
   CPU_ZERO(&mask);
   CPU_SET(req_core,&mask);
+  kill(req_job->job_pid, SIGTSTP);
   if(sched_setaffinity(req_job->job_pid,sizeof(mask),&mask) == FAIL)
   {
     perror("smash error: sched_setaffinity failed");
     FreeArgs(args,args_num);
     return; 
   }
+  kill(req_job->job_pid, SIGCONT);
   FreeArgs(args,args_num);
  }
 
@@ -1158,7 +1171,7 @@ void AlarmsList::removeAlarms()
       {
         delete current_alarm->cmd_line;
       }
-      kill(current_alarm->pid, SIGTSTP);
+      kill(current_alarm->pid, SIGKILL);
       alarms_list.erase(current_alarm);
       current_alarm--;
     }
@@ -1190,4 +1203,64 @@ void TimeoutCommand::execute()
   *(smash.last_alarm) = (string)cmd_line;
   smash.executeCommand(command.c_str(), true);
   FreeArgs(args, arg_num);
+}
+
+
+////Kill command //////
+
+KillCommand::KillCommand(const char* cmd_line, JobsList* job_list) : BuiltInCommand(cmd_line), jobs_list(job_list) {}
+
+
+void KillCommand::execute()
+{
+  int arg_num = 0;
+  char** args = PrepareArgs(cmd_line, &arg_num);
+  if(arg_num != 3)
+  {
+    cout << "smash error: kill: invalid arguments" << endl;
+    FreeArgs(args, arg_num);
+  }
+  string second_argument = (string)args[1];
+  string third_argument = (string)args[2];
+  if(second_argument.find("-") != 0)
+  {
+    cout << "smash error: kill: invalid arguments" << endl;
+    FreeArgs(args, arg_num);
+  }
+  if(second_argument.find_first_not_of("-") != 1)
+  {
+    cout << "smash error: kill: invalid arguments" << endl;
+    FreeArgs(args, arg_num);  
+  }  
+  if(!_is_number(args[1] + 1) || !_is_number(args[2]))
+  {
+    cout << "smash error: kill: invalid arguments" << endl;
+    FreeArgs(args, arg_num);     
+  }
+
+
+  auto req_job = jobs_list->getJobById(stoi(args[2]));
+  if(!req_job)
+  {
+    cout << "smash error: kill: job-id " << stoi(args[2]) << " does not exist" << endl;
+    FreeArgs(args,arg_num);
+    return;
+  }
+  pid_t req_job_pid = req_job->job_pid;
+  auto signal = stoi(args[1]+1);
+  if(kill(req_job_pid,signal)==FAIL)
+  {
+    perror("smash error : kill failed");
+    FreeArgs(args,arg_num);
+  }
+  cout << "signal number " << args[1] + 1 << " was sent to pid " << req_job->job_pid << endl;
+  if(signal == SIGCONT)
+  {
+    req_job->is_stopped = false;
+  }
+    if(signal == SIGTSTP)
+  {
+    req_job->is_stopped = true;
+  }
+  FreeArgs(args,arg_num);
 }

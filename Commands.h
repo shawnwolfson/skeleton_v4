@@ -137,9 +137,9 @@ class JobsList {
   int jobs_counter = 1;
   JobsList();
   virtual ~JobsList() {}
-  void addJob(const char* cmd_line, __pid_t job_pid, bool isStopped = false);
+  void addJob(const char* cmd_line, __pid_t job_pid, bool isStopped = false ,bool is_timed_command = false, time_t duration = 0);
   void printJobsList();
-  void killAllJobs(int* killed);
+  void killAllJobs();
   void removeFinishedJobs();
   JobEntry * getJobById(int jobId);
   void removeJobById(int jobId);
@@ -216,8 +216,7 @@ JobsList* jobs_list;
 };
 
 class KillCommand : public BuiltInCommand {
-  /* Bonus */
- // TODO: Add your data members
+JobsList* jobs_list;
  public:
   KillCommand(const char* cmd_line, JobsList* jobs);
   virtual ~KillCommand() {}
