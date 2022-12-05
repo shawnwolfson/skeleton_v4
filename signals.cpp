@@ -10,7 +10,8 @@ void ctrlZHandler(int sig_num) {
   SmallShell& smash = SmallShell::getInstance();
   if(smash.current_process_running_in_foreground_pid > NO_PROCCESS)
   {
-    smash.jobs_list.addJob((*(smash.last_command)).c_str(), smash.current_process_running_in_foreground_pid, true);
+    smash.jobs_list.addJob((*(smash.last_command)).c_str(), smash.current_process_running_in_foreground_pid, true, 
+                              smash.is_fg_timed_command, smash.current_duration, smash.fg_job_id);
     kill(smash.current_process_running_in_foreground_pid, SIGSTOP);
     cout << "smash: process " << smash.current_process_running_in_foreground_pid << " was stopped" << endl;
     *(smash.last_command) = "";
