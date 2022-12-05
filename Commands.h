@@ -128,7 +128,8 @@ class JobsList {
     bool is_background;
     bool is_stopped;
     std::string* cmd_line;
-    JobEntry(int job_id, __pid_t job_pid, time_t entred_list_time, char** process_args,int num_of_args, bool is_background, std::string* cmd_line, bool is_stopped);
+    bool is_timed_job;
+    JobEntry(int job_id, __pid_t job_pid, time_t entred_list_time, char** process_args,int num_of_args, bool is_background, std::string* cmd_line, bool is_stopped, bool is_timed_job);
     virtual ~JobEntry() {}
   };
 
@@ -137,7 +138,7 @@ class JobsList {
   int jobs_counter = 1;
   JobsList();
   virtual ~JobsList() {}
-  void addJob(const char* cmd_line, __pid_t job_pid, bool isStopped = false ,bool is_timed_command = false, time_t duration = 0);
+  void addJob(const char* cmd_line, __pid_t job_pid, bool isStopped = false ,bool is_timed_command = false, time_t duration = 0, int fg_job_id = -1);
   void printJobsList();
   void killAllJobs();
   void removeFinishedJobs();
@@ -237,7 +238,8 @@ class SmallShell {
   AlarmsList alarms_list;
   time_t current_duration;
   std::string* last_alarm;
-  bool process_in_foreground_got_alarm;
+  int fg_job_id;
+  int smash_pid;
   Command *CreateCommand(const char* cmd_line, bool is_timed_command = false);
   SmallShell(SmallShell const&)      = delete; // disable copy ctor
   void operator=(SmallShell const&)  = delete; // disable = operator
