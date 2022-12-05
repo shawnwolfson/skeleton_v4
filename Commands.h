@@ -238,7 +238,9 @@ class SmallShell {
   AlarmsList alarms_list;
   time_t current_duration;
   std::string* last_alarm;
+  bool process_in_foreground_got_alarm;
   int fg_job_id;
+  bool is_fg_timed_command;
   int smash_pid;
   Command *CreateCommand(const char* cmd_line, bool is_timed_command = false);
   SmallShell(SmallShell const&)      = delete; // disable copy ctor
