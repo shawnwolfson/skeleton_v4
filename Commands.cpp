@@ -145,7 +145,7 @@ bool isBackGroundAndBasicCommand(string first_word)
 // TODO: Add your implementation for classes in Commands.h 
 
 SmallShell::SmallShell() : line_prompt("smash"),last_pwd(nullptr), current_process_running_in_foreground_pid(NO_PROCCESS), last_command(new string),cur_pipe(false), 
-                           jobs_list({}), alarms_list({}), current_duration(0), last_alarm(new string),fg_job_id(-1)
+                           jobs_list({}), alarms_list({}), current_duration(0), last_alarm(new string), process_in_foreground_got_alarm(false),fg_job_id(-1)
                            {
                             smash_pid = getpid();
                             if (smash_pid == FAIL)
@@ -248,12 +248,20 @@ Command * SmallShell::CreateCommand(const char* cmd_line, bool is_timed_command)
 
 void SmallShell::executeCommand(const char *cmd_line, bool is_timed_command) {
   SmallShell& shell = SmallShell::getInstance();
+  string cmd_s = _trim(string(cmd_line));
+  string firstWord = cmd_s.substr(0, cmd_s.find_first_of(" \n"));
   shell.jobs_list.removeFinishedJobs();
   Command* cmd = CreateCommand(cmd_line, is_timed_command);
   cmd->execute();
   shell.current_process_running_in_foreground_pid = NO_PROCCESS;
   delete cmd;
   shell.current_duration = 0;
+  shell.process_in_foreground_got_alarm = false;
+  shell.is_fg_timed_command = false;
+  /*if(firstWord.compare("kill"))
+  {
+    sleep(1);
+  }*/
 }
 
 /////// Command Constructor //////
@@ -627,6 +635,10 @@ void ForegroundCommand::execute()
   *(smash.last_command) = *(req_job->cmd_line);
   smash.current_process_running_in_foreground_pid = req_job->job_pid;
   smash.fg_job_id = req_job->job_id;
+  if (req_job->is_timed_job)
+  {
+    smash.is_fg_timed_command = true;
+  }
   pid_t req_pid = req_job->job_pid;
   int process_status;
   jobs_list->removeJobById(req_job->job_id);
@@ -638,6 +650,7 @@ void ForegroundCommand::execute()
   }
   
   smash.fg_job_id = -1;
+  smash.is_fg_timed_command = false;
   FreeArgs(args,arg_num);
 }
 
@@ -787,19 +800,23 @@ void ExternalCommand::execute()
   else
   {
     SmallShell &smash = SmallShell::getInstance();
-    if(is_timed_command)
-    {
-      smash.alarms_list.addAlarm(cmd_line, process_pid, smash.current_duration);
-    }
     if(background_command) 
     {
       smash.jobs_list.addJob(cmd_line,process_pid,false, is_timed_command, smash.current_duration, smash.fg_job_id);
+      if(is_timed_command)
+      {
+        smash.alarms_list.addAlarm(cmd_line, process_pid, smash.current_duration);
+      }
       this->is_timed_command = false;
     }
     else
     {
       smash.current_process_running_in_foreground_pid = process_pid;
       *(smash.last_command) = cmd_line;
+      if(is_timed_command)
+      {
+        smash.process_in_foreground_got_alarm = true;
+      }
       int status;
       if(waitpid(process_pid,&status,WUNTRACED) == FAIL)
       {
@@ -1276,6 +1293,10 @@ void TimeoutCommand::execute()
   //alarm(duration);
   smash.current_duration = duration;
   *(smash.last_alarm) = (string)cmd_line;
+  if(!_isBackgroundComamnd(cmd_line))
+  {
+    smash.is_fg_timed_command = true;
+  }
   smash.executeCommand(command.c_str(), true);
   FreeArgs(args, arg_num);
 }
@@ -1345,9 +1366,13 @@ void KillCommand::execute()
   {
     req_job->is_stopped = false;
   }
-    if(signal == SIGTSTP)
+  if(signal == SIGTSTP)
   {
     req_job->is_stopped = true;
+  }
+  if(signal == SIGKILL || signal == SIGTERM)
+  {
+    jobs_list->removeJobById(req_job->job_id);
   }
   FreeArgs(args,arg_num);
 }
